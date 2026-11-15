@@ -15,6 +15,7 @@ Use Python 3.10 or newer. From the repository directory:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip setuptools
 python -m pip install -r requirements.txt
 python binaural_voice.py --help
 python speak.py --help
@@ -32,7 +33,9 @@ python binaural_voice.py voice.wav out.wav
 python binaural_voice.py voice.wav out.wav '[{"t":0,"tag":"right"},{"t":2.4,"tag":"behind"}]'
 ```
 
-Each `t` is the time in seconds at which movement toward the tag begins. Cue times must fall within the recording. The renderer accepts mono or stereo WAVs (stereo is averaged to mono), 8–96 kHz, from 0.01 seconds to 10 minutes. It writes 16-bit stereo WAV at the input sample rate, including the short convolution tail. Input and output paths must differ. At most 1000 cues are accepted; unknown tags and malformed input produce English errors.
+Each `t` is the time in seconds at which movement toward the tag begins. Cue times must fall within the recording. The renderer accepts mono or stereo WAVs (stereo is averaged to mono), 8–96 kHz, from 0.01 to 120 seconds, with at most 3,000,000 frames and a 64 MiB input file limit. Both duration and frame limits apply: at 48 kHz the maximum is 62.5 seconds, and at 96 kHz it is 31.25 seconds. Metadata is checked before loading samples. Supported containers are little-endian RIFF WAV with PCM 8/16/24/32-bit or IEEE float 32/64-bit audio, including these subtypes in WAVE_FORMAT_EXTENSIBLE. Float samples must be finite and within [-1, 1]. Compressed WAV, RF64 and big-endian RIFX are refused; convert them with FFmpeg first.
+
+It writes 16-bit stereo WAV at the input sample rate, including the short convolution tail. Choose a **fresh output filename**: all existing paths, including hard links and symlinks, are refused. Final output creation is exclusive, so a file appearing during rendering is also protected. At most 1000 cues are accepted; unknown tags and malformed input produce English errors.
 
 To generate and render a tagged script with ElevenLabs:
 
@@ -44,7 +47,7 @@ python speak.py "[right][whispers] Don't move. [behind] I'm right behind you. [l
 
 In PowerShell, set environment variables using `$env:ELEVENLABS_API_KEY = 'your-api-key'` and `$env:ELEVENLABS_VOICE_ID = 'your-voice-id'`. Keep credentials out of scripts and source control.
 
-The default format is `pcm_24000`. Use `--format pcm_44100` or `ELEVENLABS_FORMAT=pcm_44100` for 44.1 kHz if supported by your ElevenLabs plan. Available CLI formats are 16, 22.05, 24, 44.1 and 48 kHz PCM; account availability varies. The model is `eleven_v3`. Scripts are limited to 5000 characters including tags; provider limits may be lower. For a stereo audio attachment:
+The default format is `pcm_24000`. Use `--format pcm_44100` or `ELEVENLABS_FORMAT=pcm_44100` for 44.1 kHz if supported by your ElevenLabs plan. Available CLI formats are 16, 22.05, 24, 44.1 and 48 kHz PCM; account availability varies. The model is `eleven_v3`. Scripts are limited to 5000 characters including tags; provider limits may be lower. The same duration/frame limits apply to generated audio. Provider responses are limited to 12 MiB, and encoded PCM size is checked before decoding. The output path is checked before requesting paid speech, then checked again during rendering; a concurrent file creation or later validation failure can still occur after a charge. For a stereo audio attachment:
 
 ```bash
 ffmpeg -i out.wav -c:a aac -b:a 192k out.m4a
@@ -78,7 +81,7 @@ Tags are lowercase and case-sensitive. Use bare names such as `"right"` in cue J
 3. Map each position tag to the start time of the following character. A trailing tag maps to the final character's end.
 4. Render the mono WAV with `binaural_voice.py`, or import `render(input_path, output_path, cues)`.
 
-The import-safe `speak.split_tags(text)` and `speak.aligned_cues(text, marks, alignment)` functions implement these steps. Alignment must match the exact script characters, with finite, ordered timestamps. A mismatch stops with an error rather than silently substituting random movement. A provider request may already have incurred a charge if its response fails validation.
+The import-safe `speak.split_tags(text)` and `speak.aligned_cues(text, marks, alignment, duration=None)` functions implement these steps. Alignment must match the exact script characters, with finite, ordered start and end timestamps. `speak()` checks every timestamp against decoded audio duration, even when no position tags are present. It tolerates up to 50 ms past the audio end for provider rounding and clamps those times to the audio end; pass `duration` when using the helper directly for the same check. A mismatch stops with an error rather than silently substituting random movement. A provider request may already have incurred a charge if its response fails validation.
 
 An agent tool description can say:
 
@@ -115,6 +118,8 @@ python -m unittest discover -s tests -v
 ```
 
 Tests use synthetic WAVs and mocked provider responses, with no paid requests or credentials required.
+
+These resource limits bound local processing but do not provide a service sandbox. A hosted or MCP wrapper must additionally restrict input/output directories, enforce per-job memory/time limits, and control access to paid generation.
 
 ## License, attribution and dataset
 

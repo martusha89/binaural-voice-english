@@ -8,6 +8,8 @@ import json
 import math
 import os
 import random
+import stat
+import struct
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import fftconvolve, resample_poly
@@ -22,6 +24,78 @@ DIST_MOVE = 1.5  # Voiced seconds per distance change.
 DRIFT_DEG, DRIFT_M = 5, 0.015
 # Restore the official gains removed by per-distance dataset normalization.
 GAINS = [1.00, 0.33, 0.25, 0.16, 0.095]
+MAX_SECONDS = 120
+MAX_FRAMES = 3_000_000
+MAX_WAV_BYTES = 64 * 1024 * 1024
+
+
+def preflight_output(path):
+    """Reject existing destinations, including dangling links, before expensive work.
+
+    This is an early usability check; exclusive creation at write time is required.
+    """
+    if os.path.lexists(path):
+        raise ValueError("Output already exists; choose a fresh filename")
+    parent = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(parent):
+        raise ValueError("Output directory does not exist")
+    if not os.access(parent, os.W_OK):
+        raise ValueError("Output directory is not writable")
+
+
+def preflight_wav(source):
+    """Inspect bounded little-endian RIFF metadata before SciPy allocates samples."""
+    info = os.fstat(source.fileno())
+    if not stat.S_ISREG(info.st_mode) or not 12 <= info.st_size <= MAX_WAV_BYTES:
+        raise ValueError("Input must be a regular WAV file of at most 64 MiB")
+    header = source.read(12)
+    if header[:4] != b"RIFF" or header[8:] != b"WAVE":
+        raise ValueError("Only little-endian RIFF WAV is supported")
+    end = struct.unpack_from("<I", header, 4)[0] + 8
+    if not 12 <= end <= info.st_size:
+        raise ValueError("Invalid or truncated WAV container")
+    fmt = None
+    frames = None
+    while source.tell() < end:
+        if end - source.tell() < 8:
+            raise ValueError("Truncated WAV chunk header")
+        chunk, size = struct.unpack("<4sI", source.read(8))
+        chunk_end = source.tell() + size
+        # SciPy and Python's wave writer may omit padding after final odd data.
+        if chunk_end > end or (chunk_end + (size & 1) > end and chunk != b"data"):
+            raise ValueError("Truncated WAV chunk")
+        if chunk == b"fmt ":
+            if fmt is not None or size < 16:
+                raise ValueError("Invalid WAV format chunk")
+            raw = source.read(min(size, 40))
+            kind, channels, fs, rate, block, bits = struct.unpack_from("<HHIIHH", raw)
+            if kind == 0xFFFE:
+                if size < 40 or struct.unpack_from("<H", raw, 16)[0] < 22:
+                    raise ValueError("Invalid extensible WAV format")
+                if raw[28:40] != bytes.fromhex("00001000800000aa00389b71"):
+                    raise ValueError("Unsupported extensible WAV subtype")
+                kind = struct.unpack_from("<I", raw, 24)[0]
+                valid_bits = struct.unpack_from("<H", raw, 18)[0]
+                if not 1 <= valid_bits <= bits:
+                    raise ValueError("Invalid extensible WAV bit depth")
+            if channels not in (1, 2) or not 8000 <= fs <= 96000:
+                raise ValueError("WAV must be mono/stereo at 8000–96000 Hz")
+            if not ((kind == 1 and bits in (8, 16, 24, 32)) or (kind == 3 and bits in (32, 64))):
+                raise ValueError("WAV must use PCM 8/16/24/32-bit or IEEE float 32/64-bit")
+            if block != channels * (bits // 8) or rate != fs * block:
+                raise ValueError("Inconsistent WAV byte rate or block alignment")
+            fmt = (fs, channels, block)
+        elif chunk == b"data":
+            if fmt is None or frames is not None or size % fmt[2]:
+                raise ValueError("Invalid WAV data chunk")
+            frames = size // fmt[2]
+            if not math.ceil(fmt[0] / 100) <= frames <= min(fmt[0] * MAX_SECONDS, MAX_FRAMES):
+                raise ValueError("WAV must be 0.01–120 seconds and at most 3,000,000 frames")
+        source.seek(min(chunk_end + (size & 1), end))
+    if frames is None:
+        raise ValueError("WAV has no audio data")
+    source.seek(0)
+    return fmt[0], fmt[1], frames
 
 
 def validate_cues(cues, duration):
@@ -38,22 +112,29 @@ def validate_cues(cues, duration):
         tag = ALIASES.get(tag, tag)
         if tag not in TAGS:
             raise ValueError("Unknown position tag: " + tag)
-        if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or not 0 <= t <= duration:
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= duration:
             raise ValueError("Cue times must be finite seconds within the audio duration")
         result.append({"t": t, "tag": tag})
     return result
 
 
 def render(src, dst, tag_cues=None):
-    """Render up to ten minutes of WAV audio, averaging stereo input to mono.
+    """Render bounded WAV audio, averaging stereo input to mono.
 
     Motion advances during speech; azimuth and distance follow independent
     eased tracks. Overlapping Hann windows are convolved with interpolated HRIRs.
     """
+    preflight_output(dst)
     if os.path.realpath(src) == os.path.realpath(dst):
         raise ValueError("Input and output paths must differ")
     tag_cues = [] if tag_cues is None else tag_cues
-    fs, x = wavfile.read(src)
+    with open(src, "rb") as source:
+        expected_fs, channels, frames = preflight_wav(source)
+        fs, x = wavfile.read(source)
+    if fs != expected_fs or len(x) != frames or x.ndim not in (1, 2) or (1 if x.ndim == 1 else x.shape[1]) != channels:
+        raise ValueError("Decoded WAV does not match its metadata")
+    if np.issubdtype(x.dtype, np.floating) and np.any(np.abs(x) > 1):
+        raise ValueError("Floating-point WAV samples must be within [-1, 1]")
     if np.issubdtype(x.dtype, np.integer):
         x = ((x.astype(np.float64) - 128) / 128 if x.dtype == np.uint8
              else x.astype(np.float64) / np.iinfo(x.dtype).max)
@@ -62,8 +143,8 @@ def render(src, dst, tag_cues=None):
         raise ValueError("WAV must contain mono or stereo audio")
     if not 8000 <= fs <= 96000:
         raise ValueError("WAV sample rate must be between 8000 and 96000 Hz")
-    if len(x) < fs // 100 or len(x) > fs * 600:
-        raise ValueError("WAV duration must be between 0.01 and 600 seconds")
+    if not math.ceil(fs / 100) <= len(x) <= min(fs * MAX_SECONDS, MAX_FRAMES):
+        raise ValueError("WAV must be 0.01–120 seconds and at most 3,000,000 frames")
     if not np.all(np.isfinite(x)):
         raise ValueError("WAV samples must be finite")
     if x.ndim > 1:
@@ -164,16 +245,22 @@ def render(src, dst, tag_cues=None):
             out[s + Hop:s + Hop + len(y), e] += y
     out = out[Hop:Hop + len(x) + L]
 
+    if not np.all(np.isfinite(out)):
+        raise ValueError("Rendered audio contains nonfinite samples")
     if np.any(out):
         out *= np.sqrt((x ** 2).mean() * 2 / (out ** 2).mean())
         out *= min(1.0, 0.89 / np.abs(out).max())
-    wavfile.write(dst, fs, np.int16(out * 32767))
+    if not np.all(np.isfinite(out)):
+        raise ValueError("Rendered audio contains nonfinite samples")
+    # Exclusive creation refuses existing files and symlinks even after a race.
+    with open(dst, "xb") as destination:
+        wavfile.write(destination, fs, np.int16(out * 32767))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("input", help="Input mono/stereo WAV (8–96 kHz, 0.01–600 seconds)")
-    parser.add_argument("output", help="Output 16-bit stereo WAV; use headphones")
+    parser.add_argument("input", help="Input RIFF WAV (8–96 kHz, 0.01–120 seconds, at most 3,000,000 frames / 64 MiB)")
+    parser.add_argument("output", help="New output 16-bit stereo WAV; existing paths are refused; use headphones")
     parser.add_argument("cues", nargs="?", default="[]", help='JSON array, e.g. [{"t":0,"tag":"right"},{"t":2.4,"tag":"behind"}]')
     args = parser.parse_args(argv)
     try:
