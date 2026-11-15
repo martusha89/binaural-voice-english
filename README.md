@@ -1,143 +1,150 @@
-# binaural-voice：让 TTS 语音贴在耳边说话、绕着头走
+# binaural-voice: TTS at your ear and around your head
 
-**简体中文** | [日本語](README.ja.md)
+**English** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-TTS 生成的语音条都是单声道，戴耳机听，声音像在脑袋正中间。这个小工具把单声道人声渲染成**双耳立体声**：用 Neumann KU100 假人头实测的**近场** HRIR（25cm 起），让声音像贴在耳边说话，并且可以按稿子里的**位置标签**，在头周围慢慢移动。
+English edition of [Saekisui/binaural-voice](https://github.com/Saekisui/binaural-voice). Converts mono speech into **binaural stereo**, using measured Neumann KU100 **near-field** head-related impulse responses (HRIRs), starting at 25 cm. Position tags let the voice move gradually around your head as it speaks.
 
-**只对耳机成立。**
+**Listen with headphones.** The near-ear bass response and large differences between ears come from measurements, rather than volume panning alone. Movement advances during speech and pauses during silence. Without position tags, a short movement pattern is chosen randomly.
 
-- 贴耳：25cm 近场实测数据。耳边说话的低频抬升、两耳之间的巨大音量差，都来自真实测量，不是靠调音量模拟
-- 移动：稿子里写 `[左耳]` `[右耳]` `[脑后]` `[面前]` `[贴近]` `[退开]`，声音会一边说一边慢慢挪过去
-- 只在出声的时候走，换气停顿时停在原地，所以不会从一只耳朵瞬移到另一只
-- 一个标签都没写的话，随机抽一种走法
+This project is a Python command-line tool, **not a native MCP server**. You can call it from your application or an agent's local tool runner.
 
-## 快速开始
+## Setup
+
+Use Python 3.10 or newer. From the repository directory:
 
 ```bash
-pip install numpy scipy
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python binaural_voice.py --help
+python speak.py --help
 ```
 
-**已经有一段单声道人声**（任何 TTS 或录音都行）：
+On Windows, use `py -3 -m venv .venv`, then `.venv\Scripts\activate` in Command Prompt. FFmpeg is optional, for converting other audio formats. Rendering existing WAVs requires no account or network access. `speak.py` sends your script to ElevenLabs and uses your paid account's credits; check its current pricing and voice access first.
+
+## Quick start
+
+Render an existing TTS recording or other voice WAV:
 
 ```bash
 ffmpeg -i voice.mp3 -ac 1 voice.wav
-python binaural_voice.py voice.wav out.wav                        # 随机走法
-python binaural_voice.py voice.wav out.wav '[{"t": 0, "tag": "右耳"}, {"t": 2.4, "tag": "脑后"}]'
+python binaural_voice.py voice.wav out.wav
+python binaural_voice.py voice.wav out.wav '[{"t":0,"tag":"right"},{"t":2.4,"tag":"behind"}]'
 ```
 
-`t` 是从第几秒起往那个位置走。
+Each `t` is the time in seconds at which movement toward the tag begins. Cue times must fall within the recording. The renderer accepts mono or stereo WAVs (stereo is averaged to mono), 8–96 kHz, from 0.01 seconds to 10 minutes. It writes 16-bit stereo WAV at the input sample rate, including the short convolution tail. Input and output paths must differ. At most 1000 cues are accepted; unknown tags and malformed input produce English errors.
 
-**用 ElevenLabs 直接念带标签的稿子**：
+To generate and render a tagged script with ElevenLabs:
 
 ```bash
-export ELEVENLABS_API_KEY=...
-export ELEVENLABS_VOICE_ID=...
-python speak.py "[右耳][whispers] Don't move. [脑后] I'm right behind you. [左耳] And now I'm here." out.wav
+export ELEVENLABS_API_KEY='your-api-key'
+export ELEVENLABS_VOICE_ID='your-voice-id'
+python speak.py "[right][whispers] Don't move. [behind] I'm right behind you. [left] And now I'm here." out.wav
 ```
 
-- 默认输出 24kHz。如果是 Pro 及以上套餐，可以设 `ELEVENLABS_FORMAT=pcm_44100` 换成 44.1kHz
-- 输出是 WAV。要转成 m4a 的话：`ffmpeg -i out.wav -c:a aac -b:a 192k out.m4a`，码率别压太低
+In PowerShell, set environment variables using `$env:ELEVENLABS_API_KEY = 'your-api-key'` and `$env:ELEVENLABS_VOICE_ID = 'your-voice-id'`. Keep credentials out of scripts and source control.
 
-## 位置标签
+The default format is `pcm_24000`. Use `--format pcm_44100` or `ELEVENLABS_FORMAT=pcm_44100` for 44.1 kHz if supported by your ElevenLabs plan. Available CLI formats are 16, 22.05, 24, 44.1 and 48 kHz PCM; account availability varies. The model is `eleven_v3`. Scripts are limited to 5000 characters including tags; provider limits may be lower. For a stereo audio attachment:
 
-| 标签 | 效果 |
-|---|---|
-| `[左耳]` `[右耳]` | 到耳边，25cm |
-| `[脑后]` | 到脑后，约 31cm |
-| `[面前]` | 到面前，约 42cm |
-| `[贴近]` | 只改远近：贴回 25cm |
-| `[退开]` | 只改远近：退到 50cm，声音会自然变远变轻 |
-
-- 写在开头：一开口就在那个位置
-- 写在句子中间：从这里开始，一边说一边慢慢挪过去
-- 从一只耳朵到另一只，会从脑后绕过去，不会从脸前穿过
-- 标签只决定去哪里，快慢由脚本决定：绕半圈用 4.5 秒的出声时间，短语音里最多快四成。所以怎么写都不会跳
-- 新标签会从当前位置直接改道。`[贴近]` 和 `[退开]` 不会打断正在进行的绕行
-- 到了新位置，距离会恢复成那个位置的默认值
-- 如果已经贴在耳边（25cm，数据集最近的一档），再写 `[贴近]` 不会有变化。它主要用在 `[退开]` 之后，或者人在脑后、面前的时候
-
-没有标签时，从这几种走法里随机抽一种：整条贴着一只耳朵、从一只耳朵绕到另一只（语音够长时会在脑后停一下）、从脑后绕到耳边、从面前靠到耳边。
-
-## 接进自己的应用
-
-1. **念之前把位置标签从稿子里拿掉**。eleven_v3 会把不认识的方括号当成演出指令去演。同时记下每个标签落在拿掉之后的第几个字
-2. 用 **`/v1/text-to-speech/{voice_id}/with-timestamps`** 合成。价格跟普通接口一样，一次请求同时返回音频和逐字的起止时间
-3. 取标签后面那个字的开始时间，换算成秒
-4. 调用 `binaural_voice.py in.wav out.wav '<cues JSON>'`
-
-第 1 步用 JavaScript 写是这样：
-
-```js
-const TAG = /\[(左耳|右耳|脑后|面前|贴近|退开)\]/g;
-function splitTags(text) {
-  const marks = [];
-  let tts = "", last = 0;
-  for (const m of text.matchAll(TAG)) {
-    tts += text.slice(last, m.index);
-    marks.push({ tag: m[1], at: tts.length });
-    last = m.index + m[0].length;
-  }
-  return { tts: tts + text.slice(last), marks };
-}
-// 合成后：t = alignment.character_start_times_seconds[at]
+```bash
+ffmpeg -i out.wav -c:a aac -b:a 192k out.m4a
 ```
 
-如果稿子是 LLM 写的，在它的工具说明里加一段就行，比如：
+Use a delivery format that preserves stereo: a service that downmixes voice notes to mono loses the binaural effect.
 
-> The listener is on headphones and your voice moves around their head. Optional position tags (stripped before speaking): [左耳] / [右耳] / [脑后] / [面前] — go there, slowly, while you talk (at the very start = you're already there; ear to ear passes behind their head); [贴近] lean back in close / [退开] step back. Place them where the words mean it (I'm right behind you → [脑后]). Skip them and a movement is picked for you.
+## Position tags
 
-在 M3 Pro 的 Mac 上，16 秒的语音渲染大约 1 秒，适合语音条这种非实时的场景。实时通话就不建议加了。
+| English tag | Compatible Chinese tag | Destination |
+|---|---|---|
+| `[left]` / `[right]` | `[左耳]` / `[右耳]` | Beside the ear, 25 cm |
+| `[behind]` | `[脑后]` | Behind the head, about 31 cm |
+| `[front]` | `[面前]` | In front, about 42 cm |
+| `[close]` | `[贴近]` | Distance only: move to 25 cm |
+| `[away]` | `[退开]` | Distance only: move to 50 cm |
 
-## 为什么这么做：试听下来的结论
+Tags are lowercase and case-sensitive. Use bare names such as `"right"` in cue JSON. Chinese names remain accepted in both scripts and JSON.
 
-- **近场实测数据明显更好。** 同一句耳语、同一条移动路线、同样的响度，打乱顺序盲听三种做法：Web Audio `PannerNode`（HRTF 模式）、Resonance Audio 网页版、KU100 近场数据离线渲染，近场那条胜出。前两种都没有近场效果：`PannerNode` 的距离只改音量、不改频谱；Resonance Audio 只有 C++ SDK 做了近场，网页版没有
-- **别在停顿里移动。** 停顿时没有声音，听的人听不见移动的过程，只会觉得下一句突然换到了另一只耳朵
-- **别匀速来回摆。** 按正弦在两耳之间一直晃，听起来很死板。更像真人的节奏是：贴着一只耳朵说一阵，一边说一边慢慢绕，在脑后停一下，再到另一边
-- **eleven_v3 的时间戳，开头那段不准。** 稿子开头的语气标签（比如 `[whispers]`）会占掉开头一段时间，把第一个字的时间挤歪；句子中间的时间是准的，跟实际停顿差不到 0.1 秒。所以停顿是从音频能量里找的，位置标签才用时间戳
-- **数据集要乘回增益。** 各个距离的 SOFA 文件都各自做过归一化，要乘上官方给的增益表（25cm 为 1.0，50cm 为 0.33，…），远近的音量差才是自然的
-- 语音条的稿子一般只有一两句。如果只有一套固定编舞，每条都只能演到前半段，听起来条条一样。所以没写标签时准备了几种短走法随机抽
+- A position tag at the start sets the starting position. In mid-sentence it begins a gradual move.
+- Ear-to-ear movement passes behind the head rather than across the face.
+- A half turn takes 4.5 voiced seconds. Short recordings may accelerate the motion, but it remains smooth.
+- A new cue redirects from the current position. Distance-only tags do not interrupt the azimuth track.
+- A destination tag restores that place's default distance. `[close]` has no effect if already at the minimum 25 cm.
+- Without tags, the renderer randomly stays beside an ear, crosses between ears (with a rear stop for longer clips), approaches from behind, or approaches from the front. Subtle drift and random selection mean renders are not bit-for-bit repeatable.
 
-## 调参
+## Application and agent integration
 
-参数都在 `binaural_voice.py` 顶部：
+1. Remove position tags before synthesis and record their character offsets in the stripped text. Keep performance tags such as `[whispers]` for the TTS model.
+2. Request audio and character alignment from `/v1/text-to-speech/{voice_id}/with-timestamps`.
+3. Map each position tag to the start time of the following character. A trailing tag maps to the final character's end.
+4. Render the mono WAV with `binaural_voice.py`, or import `render(input_path, output_path, cues)`.
 
-- `PLACES`：各位置的方向和默认距离
-- `HALF_TURN`：绕半圈用几秒
-- `DIST_MOVE`：只改远近时用几秒
-- `DRIFT_DEG` / `DRIFT_M`：停住时微晃的幅度
-- 随机走法在 `random_cues()` 里
+The import-safe `speak.split_tags(text)` and `speak.aligned_cues(text, marks, alignment)` functions implement these steps. Alignment must match the exact script characters, with finite, ordered timestamps. A mismatch stops with an error rather than silently substituting random movement. A provider request may already have incurred a charge if its response fails validation.
 
-## 局限
+An agent tool description can say:
 
-- 只对耳机成立
-- 只有水平面，没有上下
-- 最近只到 25cm
-- 用的是通用的假人头数据，不是按每个人的耳朵测的，有的人会前后听反（脑后听成面前）
-- TTS 的耳语很干净，没有真人 ASMR 那种口腔音和呼吸声。声音能到耳边，但「湿」不起来
-- 用 24kHz 输出时，高频上限是 12kHz
+> The listener is wearing headphones. Optional position tags are [left], [right], [behind], [front], [close], and [away]. Position tags are removed before speech synthesis. At the start, a position tag sets your location; later tags move you gradually while you speak. Ear-to-ear motion passes behind the listener. Place tags where the words call for movement, and omit them for a random movement pattern.
 
-## 数据来源与授权
+Call the CLI using an argument array rather than constructing a shell command from generated text. The application must handle permissions, credentials, file delivery, and any MCP wrapper itself. This is offline rendering, not a real-time call processor. Upstream reports roughly one second to render 16 seconds of speech on an M3 Pro Mac; performance depends on your machine.
 
-AGPL-3.0，附加一条署名条款（见 [NOTICE](./NOTICE)）：包含或基于本项目的作品，必须同样以 AGPL-3.0 开源（做成网络服务给别人用也算），并保留 NOTICE 里的署名。`hrir/` 里的数据不在此列，沿用原作者的 CC BY 4.0。
+## Design notes from upstream listening tests
 
-`hrir/ku100_nearfield_circ360.npz` 取自：
+- Upstream preferred measured near-field KU100 rendering in informal blind comparisons against Web Audio `PannerNode` HRTF and browser Resonance Audio. This is a subjective observation, not a universal perceptual guarantee. Those browser paths lack the same measured near-field response; distance attenuation alone does not reproduce it.
+- Moving during silence hides the journey and makes the next phrase sound as if it jumped. Speech energy therefore controls movement progress: 10 ms frames, a 5% peak RMS threshold, gaps shorter than 0.4 seconds bridged, and a 0.2-second smoothing window.
+- Constant sinusoidal ear-to-ear panning sounds mechanical. Short routes with pauses and subtle local drift sound more natural to the upstream author.
+- Upstream observed inaccurate initial `eleven_v3` timestamps around opening performance tags; later timestamps were closer to the audio. Speech energy detects pauses independently of provider timestamps.
+- Each source-distance SOFA dataset was normalized separately. The official gain factors must be restored for natural distance differences.
+- Several short random routes avoid giving every short voice message the same opening choreography.
 
-> J. M. Arend, A. Neidhardt, C. Pörschmann. *Spherical Near-Field (NF) HRIR Compilation of the Neumann KU100.* Zenodo, 2020. [doi:10.5281/zenodo.4297951](https://doi.org/10.5281/zenodo.4297951) — **CC BY 4.0**
+## Tuning
 
-- 用的是其中的 `NFHRIR_CIRC360_SOFA`：水平面，1° 间隔，距离 0.25 / 0.5 / 0.75 / 1 / 1.5 m，48kHz，每条 128 点
-- 只做了格式转换：SOFA 转成 numpy 的 npz，float32，数据本身没有改动
-- 增益表出自同一条记录里的 `NF_Datasets_Gains_infos.pdf`
+Constants near the top of `binaural_voice.py` control the default positions and distances (`PLACES`), voiced seconds per half turn (`HALF_TURN`), distance transition time (`DIST_MOVE`), and subtle drift (`DRIFT_DEG`, `DRIFT_M`). Random routes are defined by `random_cues()` inside `render()`. Rendering uses 1024-sample Hann windows with 50% overlap, azimuth rounded to the nearest measured degree, distance interpolation, and gain-corrected HRIR convolution. Output loudness is matched to the source and peaks limited to about −1 dBFS. Silence remains silence.
 
-相关论文：
+## Limitations
 
-- J. M. Arend, A. Neidhardt, C. Pörschmann, "Measurement and Perceptual Evaluation of a Spherical Near-Field HRTF Set," *29th Tonmeistertagung*, 2016.
-- C. Pörschmann, J. M. Arend, A. Neidhardt, "A Spherical Near-Field HRTF Set for Auralization and Psychoacoustic Research," *142nd AES Convention*, 2017.
+- Headphones are required; only the horizontal plane is modeled, with no elevation.
+- The nearest measured distance is 25 cm.
+- Generic dummy-head responses are not personalized to your ears. Some people may hear front/back reversals.
+- Clean TTS whispers do not recreate a real ASMR performer's mouth and breath sounds.
+- At 24 kHz, the highest representable frequency is 12 kHz.
+- This edition has offline automated checks; it does not claim a new listening study or live ElevenLabs verification.
 
-想自己从原始数据转换的话（需要 `h5py`）：
+## Offline checks
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests use synthetic WAVs and mocked provider responses, with no paid requests or credentials required.
+
+## License, attribution and dataset
+
+Based on binaural-voice by Saekisui - https://github.com/Saekisui/binaural-voice
+
+The current source is **GNU AGPL-3.0 with the additional section 7(b) attribution term** in [NOTICE](NOTICE); see [LICENSE](LICENSE). Preserve the required attribution in source and appropriate legal notices. When distributing modified versions or offering modified software over a network, follow the AGPL's corresponding-source requirements. Older revisions through `1ea1816` were MIT; that is not the license of the current upstream edition used here.
+
+The data in `hrir/` remains under **CC BY 4.0**, separately from the code:
+
+> J. M. Arend, A. Neidhardt, C. Pörschmann. *Spherical Near-Field (NF) HRIR Compilation of the Neumann KU100.* Zenodo, 2020. [doi:10.5281/zenodo.4297951](https://doi.org/10.5281/zenodo.4297951).
+
+`hrir/ku100_nearfield_circ360.npz` is a format conversion of `NFHRIR_CIRC360_SOFA`: horizontal plane, 1° spacing, distances 0.25 / 0.5 / 0.75 / 1 / 1.5 m, 48 kHz, 128 samples per response. Upstream converted SOFA to float32 NumPy NPZ without otherwise modifying the measurements. The official gain table comes from `NF_Datasets_Gains_infos.pdf` in the same record. This English edition leaves the bundled data unchanged.
+
+Related papers:
+
+- J. M. Arend, A. Neidhardt, C. Pörschmann, “Measurement and Perceptual Evaluation of a Spherical Near-Field HRTF Set,” *29th Tonmeistertagung*, 2016.
+- C. Pörschmann, J. M. Arend, A. Neidhardt, “A Spherical Near-Field HRTF Set for Auralization and Psychoacoustic Research,” *142nd AES Convention*, 2017.
+
+To repeat the original format conversion, install `h5py` separately and run beside the extracted SOFA files:
 
 ```python
-import h5py, numpy as np
-d = ["025", "050", "075", "100", "150"]
-ir = np.stack([h5py.File(f"HRIR_CIRC360_NF{x}.sofa")["Data.IR"][:] for x in d]).astype(np.float32)
-np.savez_compressed("hrir/ku100_nearfield_circ360.npz", ir=ir, fs=48000, dists=np.array([0.25, 0.5, 0.75, 1.0, 1.5]))
+import h5py
+import numpy as np
+responses = []
+for distance in ["025", "050", "075", "100", "150"]:
+    with h5py.File(f"HRIR_CIRC360_NF{distance}.sofa") as source:
+        responses.append(source["Data.IR"][:])
+np.savez_compressed(
+    "hrir/ku100_nearfield_circ360.npz",
+    ir=np.stack(responses).astype(np.float32), fs=48000,
+    dists=np.array([0.25, 0.5, 0.75, 1.0, 1.5]),
+)
 ```
