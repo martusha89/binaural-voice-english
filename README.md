@@ -1,14 +1,45 @@
-# binaural-voice: TTS at your ear and around your head
+<p align="center">
+  <img src="assets/banner.svg" alt="Binaural Voice — English Edition. Speech, with a sense of space." width="100%">
+</p>
 
-**English** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+<p align="center">
+  <a href="https://github.com/martusha89/binaural-voice-english/actions/workflows/tests.yml"><img src="https://github.com/martusha89/binaural-voice-english/actions/workflows/tests.yml/badge.svg" alt="Offline test status"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-9b7bea?style=flat-square" alt="Python 3.10 or newer">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-AGPL--3.0-7964b4?style=flat-square" alt="Code: AGPL-3.0; additional attribution term in NOTICE"></a>
+  <a href="https://doi.org/10.5281/zenodo.4297951"><img src="https://img.shields.io/badge/HRIR_data-CC_BY_4.0-31998f?style=flat-square" alt="HRIR data: CC BY 4.0"></a>
+</p>
+
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> · <a href="#position-tags">Position tags</a> · <a href="#application-and-agent-integration">For developers</a> · <a href="#limits-and-safe-use">Safe use</a> · <a href="#license-attribution-and-dataset">Credits</a>
+</p>
+
+---
+
+## Give your voice somewhere to be
 
 English edition of [Saekisui/binaural-voice](https://github.com/Saekisui/binaural-voice). Converts mono speech into **binaural stereo**, using measured Neumann KU100 **near-field** head-related impulse responses (HRIRs), starting at 25 cm. Position tags let the voice move gradually around your head as it speaks.
 
-**Listen with headphones.** The near-ear bass response and large differences between ears come from measurements, rather than volume panning alone. Movement advances during speech and pauses during silence. Without position tags, a short movement pattern is chosen randomly.
+| Close enough to feel spatial | Movement that follows speech | Your voice, your workflow |
+| :--- | :--- | :--- |
+| Measured **25 cm near-field HRIRs**, not just left/right volume panning. | Routes advance while speech is sounding, rather than jumping across pauses. | Render an existing WAV locally, or generate tagged speech with **ElevenLabs**. |
+
+> [!IMPORTANT]
+> **Headphones required.** Start at a comfortable volume. Keep the output stereo—mono delivery removes the binaural effect.
 
 This project is a Python command-line tool, **not a native MCP server**. You can call it from your application or an agent's local tool runner.
 
-## Setup
+## Quick start
+
+### 1 · Set up once
+
+```bash
+git clone https://github.com/martusha89/binaural-voice-english.git
+cd binaural-voice-english
+```
 
 Use Python 3.10 or newer. From the repository directory:
 
@@ -21,39 +52,70 @@ python binaural_voice.py --help
 python speak.py --help
 ```
 
-On Windows, use `py -3 -m venv .venv`, then `.venv\Scripts\activate` in Command Prompt. FFmpeg is optional, for converting other audio formats. Rendering existing WAVs requires no account or network access. `speak.py` sends your script to ElevenLabs and uses your paid account's credits; check its current pricing and voice access first.
+<details>
+<summary><strong>Windows setup</strong></summary>
 
-## Quick start
+In Command Prompt:
+
+```bat
+py -3 -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip setuptools
+python -m pip install -r requirements.txt
+```
+
+</details>
+
+FFmpeg is optional, for converting other audio formats. **Rendering existing WAVs needs no account or network access.** Optional ElevenLabs synthesis sends your script to the provider and uses your credits.
+
+### 2 · Choose your route
+
+#### A. You already have audio — local rendering
 
 Render an existing TTS recording or other voice WAV:
 
 ```bash
 ffmpeg -i voice.mp3 -ac 1 voice.wav
 python binaural_voice.py voice.wav out.wav
-python binaural_voice.py voice.wav out.wav '[{"t":0,"tag":"right"},{"t":2.4,"tag":"behind"}]'
 ```
 
-Each `t` is the time in seconds at which movement toward the tag begins. Cue times must fall within the recording. The renderer accepts mono or stereo WAVs (stereo is averaged to mono), 8–96 kHz, from 0.01 to 120 seconds, with at most 3,000,000 frames and a 64 MiB input file limit. Both duration and frame limits apply: at 48 kHz the maximum is 62.5 seconds, and at 96 kHz it is 31.25 seconds. Metadata is checked before loading samples. Supported containers are little-endian RIFF WAV with PCM 8/16/24/32-bit or IEEE float 32/64-bit audio, including these subtypes in WAVE_FORMAT_EXTENSIBLE. Float samples must be finite and within [-1, 1]. Compressed WAV, RF64 and big-endian RIFX are refused; convert them with FFmpeg first.
+Want to direct the movement? Use a different, fresh output filename:
 
-It writes 16-bit stereo WAV at the input sample rate, including the short convolution tail. Choose a **fresh output filename**: all existing paths, including hard links and symlinks, are refused. Final output creation is exclusive, so a file appearing during rendering is also protected. At most 1000 cues are accepted; unknown tags and malformed input produce English errors.
+```bash
+python binaural_voice.py voice.wav directed.wav '[{"t":0,"tag":"right"},{"t":2.4,"tag":"behind"}]'
+```
 
-To generate and render a tagged script with ElevenLabs:
+Each `t` is the time in seconds at which movement toward the tag begins; use a recording longer than the last cue. No cues? A short movement pattern is chosen for you.
+
+#### B. Start with words — ElevenLabs synthesis
 
 ```bash
 export ELEVENLABS_API_KEY='your-api-key'
 export ELEVENLABS_VOICE_ID='your-voice-id'
-python speak.py "[right][whispers] Don't move. [behind] I'm right behind you. [left] And now I'm here." out.wav
+python speak.py "[right][whispers] Take a moment. There's no hurry. [behind][whispers] Let the rest of the room fall quiet, just for a little while. [left][whispers] That's better. Stay a moment longer." speech.wav
 ```
 
 In PowerShell, set environment variables using `$env:ELEVENLABS_API_KEY = 'your-api-key'` and `$env:ELEVENLABS_VOICE_ID = 'your-voice-id'`. Keep credentials out of scripts and source control.
 
-The default format is `pcm_24000`. Use `--format pcm_44100` or `ELEVENLABS_FORMAT=pcm_44100` for 44.1 kHz if supported by your ElevenLabs plan. Available CLI formats are 16, 22.05, 24, 44.1 and 48 kHz PCM; account availability varies. The model is `eleven_v3`. Scripts are limited to 5000 characters including tags; provider limits may be lower. The same duration/frame limits apply to generated audio. Provider responses are limited to 12 MiB, and encoded PCM size is checked before decoding. The output path is checked before requesting paid speech, then checked again during rendering; a concurrent file creation or later validation failure can still occur after a charge. For a stereo audio attachment:
+<details>
+<summary><strong>ElevenLabs formats, limits and billing</strong></summary>
+
+The default format is `pcm_24000`. Use `--format pcm_44100` or `ELEVENLABS_FORMAT=pcm_44100` for 44.1 kHz if supported by your ElevenLabs plan. Available CLI formats are 16, 22.05, 24, 44.1 and 48 kHz PCM; account availability varies. The model is `eleven_v3`. Scripts are limited to 5000 characters including tags; provider limits may be lower. The same duration/frame limits apply to generated audio. Provider responses are limited to 12 MiB, and encoded PCM size is checked before decoding. The output path is checked before requesting paid speech, then checked again during rendering; a concurrent file creation or later validation failure can still occur after a charge.
+
+</details>
+
+### 3 · Keep it stereo
+
+The result is a stereo WAV. For a smaller audio attachment, convert your chosen output with FFmpeg:
 
 ```bash
 ffmpeg -i out.wav -c:a aac -b:a 192k out.m4a
 ```
 
 Use a delivery format that preserves stereo: a service that downmixes voice notes to mono loses the binaural effect.
+
+> [!TIP]
+> **Choose a fresh filename each time.** Existing output files are deliberately protected from overwriting.
 
 ## Position tags
 
@@ -91,6 +153,9 @@ Call the CLI using an argument array rather than constructing a shell command fr
 
 ## Design notes from upstream listening tests
 
+<details>
+<summary><strong>Why near-field measurements and speech-aware movement?</strong></summary>
+
 - Upstream preferred measured near-field KU100 rendering in informal blind comparisons against Web Audio `PannerNode` HRTF and browser Resonance Audio. This is a subjective observation, not a universal perceptual guarantee. Those browser paths lack the same measured near-field response; distance attenuation alone does not reproduce it.
 - Moving during silence hides the journey and makes the next phrase sound as if it jumped. Speech energy therefore controls movement progress: 10 ms frames, a 5% peak RMS threshold, gaps shorter than 0.4 seconds bridged, and a 0.2-second smoothing window.
 - Constant sinusoidal ear-to-ear panning sounds mechanical. Short routes with pauses and subtle local drift sound more natural to the upstream author.
@@ -98,18 +163,41 @@ Call the CLI using an argument array rather than constructing a shell command fr
 - Each source-distance SOFA dataset was normalized separately. The official gain factors must be restored for natural distance differences.
 - Several short random routes avoid giving every short voice message the same opening choreography.
 
+</details>
+
 ## Tuning
 
 Constants near the top of `binaural_voice.py` control the default positions and distances (`PLACES`), voiced seconds per half turn (`HALF_TURN`), distance transition time (`DIST_MOVE`), and subtle drift (`DRIFT_DEG`, `DRIFT_M`). Random routes are defined by `random_cues()` inside `render()`. Rendering uses 1024-sample Hann windows with 50% overlap, azimuth rounded to the nearest measured degree, distance interpolation, and gain-corrected HRIR convolution. Output loudness is matched to the source and peaks limited to about −1 dBFS. Silence remains silence.
 
-## Limitations
+## Limits and safe use
+
+| Input / output | Supported range |
+| :--- | :--- |
+| Input | Mono or stereo WAV; stereo is averaged to mono |
+| Sample rate | 8–96 kHz |
+| Duration | 0.01–120 seconds **and** at most 3,000,000 frames |
+| Input file | At most 64 MiB; metadata checked before loading samples |
+| Output | 16-bit stereo WAV at the input sample rate, plus a short convolution tail |
+| Position cues | At most 1000; unknown tags and malformed input are rejected |
+| File protection | Existing paths—including hard links and symlinks—are refused; final creation is exclusive |
+
+Both duration and frame limits apply: at 48 kHz the maximum is **62.5 seconds**, and at 96 kHz it is **31.25 seconds**.
+
+<details>
+<summary><strong>Supported WAV encodings</strong></summary>
+
+Little-endian RIFF WAV with PCM 8/16/24/32-bit or IEEE float 32/64-bit audio, including these subtypes in WAVE_FORMAT_EXTENSIBLE. Float samples must be finite and within [-1, 1]. Compressed WAV, RF64 and big-endian RIFX are refused; convert them with FFmpeg first.
+
+</details>
+
+### What to expect
 
 - Headphones are required; only the horizontal plane is modeled, with no elevation.
 - The nearest measured distance is 25 cm.
 - Generic dummy-head responses are not personalized to your ears. Some people may hear front/back reversals.
 - Clean TTS whispers do not recreate a real ASMR performer's mouth and breath sounds.
 - At 24 kHz, the highest representable frequency is 12 kHz.
-- This edition has offline automated checks; it does not claim a new listening study or live ElevenLabs verification.
+- A live ElevenLabs synthesis → alignment → stereo rendering smoke test has passed, with listener confirmation. This is not a controlled listening study or a guarantee for every voice, account, or listener.
 
 ## Offline checks
 
@@ -138,7 +226,10 @@ Related papers:
 - J. M. Arend, A. Neidhardt, C. Pörschmann, “Measurement and Perceptual Evaluation of a Spherical Near-Field HRTF Set,” *29th Tonmeistertagung*, 2016.
 - C. Pörschmann, J. M. Arend, A. Neidhardt, “A Spherical Near-Field HRTF Set for Auralization and Psychoacoustic Research,” *142nd AES Convention*, 2017.
 
-To repeat the original format conversion, install `h5py` separately and run beside the extracted SOFA files:
+<details>
+<summary><strong>Reproduce the original dataset format conversion</strong></summary>
+
+Install `h5py` separately and run beside the extracted SOFA files:
 
 ```python
 import h5py
@@ -153,3 +244,9 @@ np.savez_compressed(
     dists=np.array([0.25, 0.5, 0.75, 1.0, 1.5]),
 )
 ```
+
+</details>
+
+---
+
+<p align="center"><strong>One voice. A little more room.</strong><br>English edition maintained by <a href="https://github.com/martusha89">martusha89</a> · Original renderer by <a href="https://github.com/Saekisui">Saekisui</a></p>

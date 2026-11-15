@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">Binaural Voice — English Edition</title>
+  <desc id="desc">Purple and teal sound orbits surround a headphone illustration. Speech, with a sense of space. Measured near-field audio, made approachable.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101427"/><stop offset="1" stop-color="#201333"/></linearGradient>
+    <linearGradient id="orbit"><stop stop-color="#ad83ff"/><stop offset="1" stop-color="#60e0d0"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#9273e8" stop-opacity=".2"/><stop offset="1" stop-color="#9273e8" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1200" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="955" cy="200" r="240" fill="url(#glow)"/>
+  <g fill="none" stroke="#fff" stroke-opacity=".04"><path d="M0 80H1200M0 160H1200M0 240H1200M0 320H1200"/><path d="M80 0V400M160 0V400M240 0V400M320 0V400M400 0V400M480 0V400M560 0V400M640 0V400M720 0V400M800 0V400M880 0V400M960 0V400M1040 0V400M1120 0V400"/></g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="58" y="54" width="178" height="30" rx="15" fill="#ad83ff" fill-opacity=".14" stroke="#ad83ff" stroke-opacity=".4"/>
+    <text x="147" y="74" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="2" fill="#d5bdff">ENGLISH EDITION</text>
+    <text x="56" y="163" font-size="68" font-weight="700" letter-spacing="-3" fill="#f5f2ff">Binaural Voice</text>
+    <text x="60" y="214" font-size="27" fill="#c3b9d9">Speech, with a sense of space.</text>
+    <text x="60" y="255" font-size="17" fill="#a7a1b9">Measured near-field audio. Human-readable direction.</text>
+    <path d="M60 306H106" stroke="#60e0d0" stroke-width="3"/>
+    <text x="120" y="312" font-size="13" letter-spacing="2" fill="#77e7d8">PUT YOUR HEADPHONES ON</text>
+    <text x="60" y="367" font-size="12" fill="#9188a5">Based on binaural-voice by Saekisui</text>
+  </g>
+  <g transform="translate(944 192)" fill="none">
+    <ellipse rx="170" ry="104" stroke="url(#orbit)" stroke-width="2" transform="rotate(-30)"/>
+    <ellipse rx="170" ry="104" stroke="url(#orbit)" stroke-opacity=".25" transform="rotate(30)"/>
+    <ellipse rx="195" ry="129" stroke="#ac84ff" stroke-opacity=".12" transform="rotate(-30)"/>
+    <path d="M-59 19V-10a59 59 0 0 1 118 0v29" stroke="#eee7ff" stroke-width="10" stroke-linecap="round"/>
+    <rect x="-72" y="5" width="28" height="61" rx="12" fill="#ad83ff"/>
+    <rect x="44" y="5" width="28" height="61" rx="12" fill="#60e0d0"/>
+    <path d="M-22 12v17M-11-2v44M0-15v70M11-2v44M22 12v17" stroke="url(#orbit)" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="147" cy="-85" r="7" fill="#60e0d0"/><circle cx="-147" cy="85" r="5" fill="#ad83ff"/>
+  </g>
+</svg>
